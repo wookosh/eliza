@@ -289,6 +289,17 @@ export class AgentRuntime implements IAgentRuntime {
     }
     if (plugin.routes) {
       for (const route of plugin.routes) {
+        // Check for route collisions
+        const existingRoute = this.routes.find(
+          (r) => r.path === route.path && r.type === route.type
+        );
+
+        if (existingRoute) {
+          this.logger.warn(
+            `Route collision detected: ${route.type} ${route.path} from plugin "${plugin.name}" conflicts with existing route. Plugin developers should use unique paths like "/${plugin.name}${route.path}" to avoid collisions.`
+          );
+        }
+
         this.routes.push(route);
       }
     }
