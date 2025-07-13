@@ -289,6 +289,261 @@ describe('AgentRuntime (Non-Instrumented Baseline)', () => {
       expect(runtime.models.has(ModelType.TEXT_SMALL)).toBe(true);
       ensureAgentExistsSpy.mockRestore();
     });
+
+    describe('Route Registration and Collision Detection', () => {
+      let loggerWarnSpy: any;
+
+      beforeEach(() => {
+        // Spy on logger.warn to capture collision warnings
+        loggerWarnSpy = spyOn(runtime.logger, 'warn').mockReturnValue(undefined);
+      });
+
+      afterEach(() => {
+        loggerWarnSpy.mockRestore();
+      });
+
+      it('should register routes from plugin without collision', async () => {
+        const mockPlugin: Plugin = {
+          name: 'TestPlugin',
+          description: 'A test plugin',
+          routes: [
+            {
+              type: 'GET',
+              path: '/test',
+              handler: mock().mockResolvedValue(undefined),
+            },
+            {
+              type: 'POST',
+              path: '/api/data',
+              handler: mock().mockResolvedValue(undefined),
+            },
+          ],
+        };
+
+        await runtime.registerPlugin(mockPlugin);
+
+        expect(runtime.routes).toHaveLength(2);
+        expect(runtime.routes[0].path).toBe('/test');
+        expect(runtime.routes[1].path).toBe('/api/data');
+        expect(loggerWarnSpy).not.toHaveBeenCalled();
+      });
+
+      it('should detect and warn about route collisions with same path and method', async () => {
+        const plugin1: Plugin = {
+          name: 'Plugin1',
+          description: 'First plugin',
+          routes: [
+            {
+              type: 'GET',
+              path: '/api/users',
+              handler: mock().mockResolvedValue(undefined),
+            },
+          ],
+        };
+
+        const plugin2: Plugin = {
+          name: 'Plugin2',
+          description: 'Second plugin',
+          routes: [
+            {
+              type: 'GET',
+              path: '/api/users',
+              handler: mock().mockResolvedValue(undefined),
+            },
+          ],
+        };
+
+        await runtime.registerPlugin(plugin1);
+        await runtime.registerPlugin(plugin2);
+
+        expect(runtime.routes).toHaveLength(2);
+        expect(loggerWarnSpy).toHaveBeenCalledTimes(1);
+        expect(loggerWarnSpy).toHaveBeenCalledWith(
+          'Route collision detected: GET /api/users from plugin "Plugin2" conflicts with existing route. Plugin developers should use unique paths like "/Plugin2/api/users" to avoid collisions.'
+        );
+      });
+
+      it('should not warn about routes with same path but different methods', async () => {
+        const plugin1: Plugin = {
+          name: 'Plugin1',
+          description: 'First plugin',
+          routes: [
+            {
+              type: 'GET',
+              path: '/api/data',
+              handler: mock().mockResolvedValue(undefined),
+            },
+          ],
+        };
+
+        const plugin2: Plugin = {
+          name: 'Plugin2',
+          description: 'Second plugin',
+          routes: [
+            {
+              type: 'POST',
+              path: '/api/data',
+              handler: mock().mockResolvedValue(undefined),
+            },
+          ],
+        };
+
+        await runtime.registerPlugin(plugin1);
+        await runtime.registerPlugin(plugin2);
+
+        expect(runtime.routes).toHaveLength(2);
+        expect(loggerWarnSpy).not.toHaveBeenCalled();
+      });
+
+      it('should not warn about routes with different paths but same method', async () => {
+        const plugin1: Plugin = {
+          name: 'Plugin1',
+          description: 'First plugin',
+          routes: [
+            {
+              type: 'GET',
+              path: '/api/users',
+              handler: mock().mockResolvedValue(undefined),
+            },
+          ],
+        };
+
+        const plugin2: Plugin = {
+          name: 'Plugin2',
+          description: 'Second plugin',
+          routes: [
+            {
+              type: 'GET',
+              path: '/api/posts',
+              handler: mock().mockResolvedValue(undefined),
+            },
+          ],
+        };
+
+        await runtime.registerPlugin(plugin1);
+        await runtime.registerPlugin(plugin2);
+
+        expect(runtime.routes).toHaveLength(2);
+        expect(loggerWarnSpy).not.toHaveBeenCalled();
+      });
+
+      it('should warn about multiple route collisions from the same plugin', async () => {
+        const plugin1: Plugin = {
+          name: 'Plugin1',
+          description: 'First plugin',
+          routes: [
+            {
+              type: 'GET',
+              path: '/api/users',
+              handler: mock().mockResolvedValue(undefined),
+            },
+            {
+              type: 'POST',
+              path: '/api/data',
+              handler: mock().mockResolvedValue(undefined),
+            },
+          ],
+        };
+
+        const plugin2: Plugin = {
+          name: 'Plugin2',
+          description: 'Second plugin with collisions',
+          routes: [
+            {
+              type: 'GET',
+              path: '/api/users',
+              handler: mock().mockResolvedValue(undefined),
+            },
+            {
+              type: 'POST',
+              path: '/api/data',
+              handler: mock().mockResolvedValue(undefined),
+            },
+          ],
+        };
+
+        await runtime.registerPlugin(plugin1);
+        await runtime.registerPlugin(plugin2);
+
+        expect(runtime.routes).toHaveLength(4);
+        expect(loggerWarnSpy).toHaveBeenCalledTimes(2);
+        expect(loggerWarnSpy).toHaveBeenNthCalledWith(
+          1,
+          'Route collision detected: GET /api/users from plugin "Plugin2" conflicts with existing route. Plugin developers should use unique paths like "/Plugin2/api/users" to avoid collisions.'
+        );
+        expect(loggerWarnSpy).toHaveBeenNthCalledWith(
+          2,
+          'Route collision detected: POST /api/data from plugin "Plugin2" conflicts with existing route. Plugin developers should use unique paths like "/Plugin2/api/data" to avoid collisions.'
+        );
+      });
+
+      it('should handle plugins with no routes without error', async () => {
+        const mockPlugin: Plugin = {
+          name: 'NoRoutesPlugin',
+          description: 'Plugin without routes',
+        };
+
+        await runtime.registerPlugin(mockPlugin);
+
+        expect(runtime.routes).toHaveLength(0);
+        expect(loggerWarnSpy).not.toHaveBeenCalled();
+      });
+
+      it('should handle routes with all supported HTTP methods', async () => {
+        const plugin1: Plugin = {
+          name: 'Plugin1',
+          description: 'Plugin with all HTTP methods',
+          routes: [
+            {
+              type: 'GET',
+              path: '/api/test',
+              handler: mock().mockResolvedValue(undefined),
+            },
+            {
+              type: 'POST',
+              path: '/api/test',
+              handler: mock().mockResolvedValue(undefined),
+            },
+            {
+              type: 'PUT',
+              path: '/api/test',
+              handler: mock().mockResolvedValue(undefined),
+            },
+            {
+              type: 'DELETE',
+              path: '/api/test',
+              handler: mock().mockResolvedValue(undefined),
+            },
+            {
+              type: 'STATIC',
+              path: '/static',
+              filePath: '/path/to/static',
+            },
+          ],
+        };
+
+        const plugin2: Plugin = {
+          name: 'Plugin2',
+          description: 'Plugin with collision on POST',
+          routes: [
+            {
+              type: 'POST',
+              path: '/api/test',
+              handler: mock().mockResolvedValue(undefined),
+            },
+          ],
+        };
+
+        await runtime.registerPlugin(plugin1);
+        await runtime.registerPlugin(plugin2);
+
+        expect(runtime.routes).toHaveLength(6);
+        expect(loggerWarnSpy).toHaveBeenCalledTimes(1);
+        expect(loggerWarnSpy).toHaveBeenCalledWith(
+          'Route collision detected: POST /api/test from plugin "Plugin2" conflicts with existing route. Plugin developers should use unique paths like "/Plugin2/api/test" to avoid collisions.'
+        );
+      });
+    });
   });
 
   describe('Initialization', () => {
